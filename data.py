@@ -4,8 +4,8 @@ import re
 import os
 
 # ── Tablas Snowflake ──────────────────────────────────────────────────────────
-FORECAST_TABLE    = "FORECAST_DB.APP.FORECAST_DATA"
-USUARIOS_TABLE    = "FORECAST_DB.APP.USUARIOS"
+FORECAST_TABLE     = "FORECAST_DB.APP.FORECAST_DATA"
+USUARIOS_TABLE     = "FORECAST_DB.APP.USUARIOS"
 DELEGACIONES_TABLE = "FORECAST_DB.APP.DELEGACIONES"
 
 APP_TO_SF = {
@@ -17,46 +17,67 @@ APP_TO_SF = {
 }
 SF_TO_APP = {v: k for k, v in APP_TO_SF.items()}
 
-DATA_DIR = "datos"
+DATA_DIR      = "datos"
 ACTIVITY_FILE = os.path.join(DATA_DIR, "_upload_actividad.csv")
 MARKET_FILE   = os.path.join(DATA_DIR, "_upload_mercado.xlsx")
 
 
-# ── Sesión Snowflake (SiS o Streamlit Cloud) ─────────────────────────────────
+# ── Conexión Snowflake (snowflake-connector-python) ──────────────────────────
 
-def get_sf_session():
-    """Devuelve sesión Snowflake: usa get_active_session() en SiS,
-    o crea una nueva con st.secrets en Streamlit Cloud."""
-    if 'sf_session' in st.session_state and st.session_state['sf_session'] is not None:
-        return st.session_state['sf_session']
+def _get_connection():
+    """Devuelve una conexión a Snowflake usando snowflake-connector-python.
+    Cachea la conexión en session_state para reutilizarla."""
+    if 'sf_conn' in st.session_state:
+        conn = st.session_state['sf_conn']
+        try:
+            conn.cursor().execute("SELECT 1")
+            return conn
+        except Exception:
+            pass  # Conexión caída, reconectar
 
-    # Intento 1: Streamlit in Snowflake
+    import snowflake.connector
     try:
-        from snowflake.snowpark.context import get_active_session
-        session = get_active_session()
-        st.session_state['sf_session'] = session
-        return session
-    except Exception:
-        pass
-
-    # Intento 2: Conexión externa (Streamlit Cloud)
-    try:
-        from snowflake.snowpark import Session
-        params = {
-            "account":   st.secrets["SNOWFLAKE_ACCOUNT"],
-            "user":      st.secrets["SNOWFLAKE_USER"],
-            "password":  st.secrets["SNOWFLAKE_PASSWORD"],
-            "warehouse": st.secrets.get("SNOWFLAKE_WAREHOUSE", "FORECAST_WH"),
-            "database":  st.secrets.get("SNOWFLAKE_DATABASE", "FORECAST_DB"),
-            "schema":    st.secrets.get("SNOWFLAKE_SCHEMA", "APP"),
-            "role":      st.secrets.get("SNOWFLAKE_ROLE", "FORECAST_ROLE"),
-        }
-        session = Session.builder.configs(params).create()
-        st.session_state['sf_session'] = session
-        return session
+        conn = snowflake.connector.connect(
+            account   = st.secrets["SNOWFLAKE_ACCOUNT"],
+            user      = st.secrets["SNOWFLAKE_USER"],
+            password  = st.secrets["SNOWFLAKE_PASSWORD"],
+            warehouse = st.secrets.get("SNOWFLAKE_WAREHOUSE", "FORECAST_WH"),
+            database  = st.secrets.get("SNOWFLAKE_DATABASE", "FORECAST_DB"),
+            schema    = st.secrets.get("SNOWFLAKE_SCHEMA", "APP"),
+            role      = st.secrets.get("SNOWFLAKE_ROLE", "FORECAST_ROLE"),
+        )
+        st.session_state['sf_conn'] = conn
+        return conn
     except Exception as e:
-        st.error(f"❌ No se pudo conectar a Snowflake: {e}")
+        st.error(f"❌ Error de conexión a Snowflake: `{type(e).__name__}: {e}`")
         return None
+
+
+def _query(sql):
+    """Ejecuta SQL y devuelve un DataFrame."""
+    conn = _get_connection()
+    if conn is None:
+        return pd.DataFrame()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql)
+        cols = [desc[0] for desc in cur.description]
+        rows = cur.fetchall()
+        return pd.DataFrame(rows, columns=cols)
+    except Exception as e:
+        st.error(f"❌ Error SQL: `{e}`")
+        return pd.DataFrame()
+
+
+def _exec(sql):
+    """Ejecuta SQL sin devolver datos."""
+    conn = _get_connection()
+    if conn is None:
+        return
+    try:
+        conn.cursor().execute(sql)
+    except Exception as e:
+        st.error(f"❌ Error SQL: `{e}`")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -81,22 +102,23 @@ def _extract_sap(client_str):
     return m.group(1) if m else None
 
 
+def _esc(val):
+    """Escapa comillas simples para SQL."""
+    return str(val).replace("'", "''")
+
+
 # ── Forecast ──────────────────────────────────────────────────────────────────
 
 def load_forecast():
-    session = get_sf_session()
-    if session is None:
-        return pd.DataFrame()
-    try:
-        df = session.sql(f"SELECT * FROM {FORECAST_TABLE}").to_pandas()
-        return df.rename(columns=SF_TO_APP)
-    except Exception:
-        return pd.DataFrame()
+    df = _query(f"SELECT * FROM {FORECAST_TABLE}")
+    if df.empty:
+        return df
+    return df.rename(columns=SF_TO_APP)
 
 
 def save_forecast(df):
-    session = get_sf_session()
-    if session is None:
+    conn = _get_connection()
+    if conn is None:
         return
     df_sf = df.rename(columns=APP_TO_SF)
     cols  = [c for c in APP_TO_SF.values() if c in df_sf.columns]
@@ -104,90 +126,86 @@ def save_forecast(df):
     for c in ['QTY_LY', 'ACTUAL_LY', 'QTY_BUDGET', 'BUDGET', 'QTY_ACTUAL', 'ACTUAL']:
         if c in df_sf.columns:
             df_sf[c] = pd.to_numeric(df_sf[c], errors='coerce').fillna(0)
-    session.sql(f"TRUNCATE TABLE {FORECAST_TABLE}").collect()
-    session.write_pandas(df_sf, "FORECAST_DATA",
-                         database="FORECAST_DB", schema="APP", overwrite=False)
+
+    _exec(f"TRUNCATE TABLE {FORECAST_TABLE}")
+
+    # Insertar en lotes de 100 filas usando INSERT multi-valor
+    col_names = ', '.join(cols)
+    batch = []
+    for _, row in df_sf.iterrows():
+        vals = []
+        for c in cols:
+            v = row[c]
+            if c in ['QTY_LY', 'ACTUAL_LY', 'QTY_BUDGET', 'BUDGET', 'QTY_ACTUAL', 'ACTUAL']:
+                vals.append(str(float(v)) if pd.notna(v) else '0')
+            else:
+                vals.append(f"'{_esc(v)}'")
+        batch.append(f"({', '.join(vals)})")
+        if len(batch) >= 100:
+            _exec(f"INSERT INTO {FORECAST_TABLE} ({col_names}) VALUES {', '.join(batch)}")
+            batch = []
+    if batch:
+        _exec(f"INSERT INTO {FORECAST_TABLE} ({col_names}) VALUES {', '.join(batch)}")
 
 
 def delete_forecast():
-    session = get_sf_session()
-    if session:
-        session.sql(f"TRUNCATE TABLE {FORECAST_TABLE}").collect()
+    _exec(f"TRUNCATE TABLE {FORECAST_TABLE}")
 
 
 # ── Usuarios ──────────────────────────────────────────────────────────────────
 
 def load_users():
-    session = get_sf_session()
-    if session is None:
+    df = _query(f"SELECT EMAIL, PASSWORD, COMERCIAL, ROL FROM {USUARIOS_TABLE}")
+    if df.empty:
         return {}
-    try:
-        df = session.sql(
-            f"SELECT EMAIL, PASSWORD, COMERCIAL, ROL FROM {USUARIOS_TABLE}"
-        ).to_pandas()
-        return {
-            str(r['EMAIL']).strip().lower(): {
-                'password':  str(r['PASSWORD']),
-                'comercial': str(r['COMERCIAL']),
-                'role':      str(r['ROL'])
-            }
-            for _, r in df.iterrows()
+    return {
+        str(r['EMAIL']).strip().lower(): {
+            'password':  str(r['PASSWORD']),
+            'comercial': str(r['COMERCIAL']),
+            'role':      str(r['ROL'])
         }
-    except Exception:
-        return {}
+        for _, r in df.iterrows()
+    }
 
 
 def save_users_from_df(df):
-    session = get_sf_session()
-    if session is None:
-        return
-    session.sql(f"TRUNCATE TABLE {USUARIOS_TABLE}").collect()
+    _exec(f"TRUNCATE TABLE {USUARIOS_TABLE}")
     for _, r in df.iterrows():
         email = str(r.iloc[0]).strip().lower()
         pwd   = str(r.iloc[1]).strip()
         com   = str(r.iloc[2]).strip() if len(df.columns) >= 3 else ''
         if email and '@' in email and email != 'nan':
-            session.sql(f"""
+            _exec(f"""
                 INSERT INTO {USUARIOS_TABLE} (EMAIL, PASSWORD, COMERCIAL, ROL)
-                VALUES ('{email}', '{pwd}', '{com}', 'comercial')
-            """).collect()
+                VALUES ('{_esc(email)}', '{_esc(pwd)}', '{_esc(com)}', 'comercial')
+            """)
     # Siempre mantener admin
-    session.sql(f"""
+    _exec(f"""
         INSERT INTO {USUARIOS_TABLE} (EMAIL, PASSWORD, COMERCIAL, ROL)
         SELECT 'vbrrsg@gmail.com','Albope5@','__ADMIN__','admin'
         WHERE NOT EXISTS (
             SELECT 1 FROM {USUARIOS_TABLE} WHERE EMAIL='vbrrsg@gmail.com')
-    """).collect()
+    """)
 
 
 # ── Delegaciones ──────────────────────────────────────────────────────────────
 
 def load_delegaciones():
-    session = get_sf_session()
-    if session is None:
+    df = _query(f"SELECT TITULAR, GESTOR FROM {DELEGACIONES_TABLE}")
+    if df.empty:
         return pd.DataFrame(columns=['Comercial_Titular', 'Comercial_Gestor'])
-    try:
-        df = session.sql(
-            f"SELECT TITULAR, GESTOR FROM {DELEGACIONES_TABLE}"
-        ).to_pandas()
-        df.columns = ['Comercial_Titular', 'Comercial_Gestor']
-        return df
-    except Exception:
-        return pd.DataFrame(columns=['Comercial_Titular', 'Comercial_Gestor'])
+    df.columns = ['Comercial_Titular', 'Comercial_Gestor']
+    return df
 
 
 def save_delegaciones_from_df(df):
-    session = get_sf_session()
-    if session is None:
-        return
-    session.sql(f"TRUNCATE TABLE {DELEGACIONES_TABLE}").collect()
+    _exec(f"TRUNCATE TABLE {DELEGACIONES_TABLE}")
     for _, r in df.iterrows():
         t = str(r.iloc[0]).strip()
         g = str(r.iloc[1]).strip()
         if t and g and t != 'nan':
-            session.sql(
-                f"INSERT INTO {DELEGACIONES_TABLE} (TITULAR, GESTOR) VALUES ('{t}','{g}')"
-            ).collect()
+            _exec(f"INSERT INTO {DELEGACIONES_TABLE} (TITULAR, GESTOR) "
+                  f"VALUES ('{_esc(t)}', '{_esc(g)}')")
 
 
 def get_managed_comerciales(my_comercial):

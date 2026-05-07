@@ -1,3 +1,3 @@
-# Punto de entrada estándar para Streamlit Cloud
-# Redirige al archivo principal de la aplicación
-import app_forecast
+# Punto de entrada para Streamlit Cloud
+# Ejecuta app_forecast.py directamente
+exec(open("app_forecast.py").read())

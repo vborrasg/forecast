@@ -3,7 +3,7 @@ import os, random, smtplib, sys, json
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from data import load_users, load_delegaciones, get_managed_comerciales
+from data import load_users
 
 ADMIN_EMAIL = "vbrrsg@gmail.com"
 
