@@ -86,19 +86,25 @@ def render_login():
                 email = st.text_input("Email", placeholder="tu@empresa.com")
                 pwd   = st.text_input("Contraseña", type="password")
                 if st.form_submit_button("Siguiente →", use_container_width=True):
-                    u  = load_users()
-                    ec = email.strip().lower()
-                    if ec in u and u[ec]["password"] == pwd:
-                        otp = str(random.randint(100000, 999999))
-                        st.session_state.update({
-                            "current_user": ec, "otp_code": otp,
-                            "otp_attempts": 0, "otp_timestamp": datetime.now()
-                        })
-                        if send_otp(ec, otp):
-                            st.session_state["otp_sent"] = True
-                            st.rerun()
-                    else:
-                        st.error("❌ Credenciales incorrectas")
+                    try:
+                        u  = load_users()
+                        ec = email.strip().lower()
+                        if not u:
+                            st.error("⚠️ No se pudo conectar a Snowflake. "
+                                     "Revisa los Secrets de Streamlit Cloud.")
+                        elif ec in u and u[ec]["password"] == pwd:
+                            otp = str(random.randint(100000, 999999))
+                            st.session_state.update({
+                                "current_user": ec, "otp_code": otp,
+                                "otp_attempts": 0, "otp_timestamp": datetime.now()
+                            })
+                            if send_otp(ec, otp):
+                                st.session_state["otp_sent"] = True
+                                st.rerun()
+                        else:
+                            st.error("❌ Credenciales incorrectas")
+                    except Exception as ex:
+                        st.error(f"❌ Error al conectar: `{type(ex).__name__}: {ex}`")
         else:
             with st.form("otp_form"):
                 st.info("Se ha enviado un código de 6 dígitos a tu email.")
