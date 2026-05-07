@@ -2,8 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import io
-from data import load_forecast, save_forecast, recalc
-from auth import get_managed_comerciales
+from data import load_forecast, save_forecast, recalc, get_managed_comerciales
 
 MIME_XL = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -51,9 +50,9 @@ def _summary_block(df, group_col, title, key_prefix, show_chart=True):
         st.plotly_chart(fig, use_container_width=True)
 
 
-def render_comercial_tabs(my_comercial):
-    df_master = load_forecast()
-    managed   = get_managed_comerciales(my_comercial)
+def render_comercial_tabs(session, my_comercial):
+    df_master = load_forecast(session)
+    managed   = get_managed_comerciales(session, my_comercial)
     is_delegate = len(managed) > 1
 
     tabs = st.tabs(["📝 Mis Previsiones", "📊 Mi Resumen"])
@@ -178,7 +177,7 @@ def render_comercial_tabs(my_comercial):
                 for idx, row in edited.iterrows():
                     df_updated.loc[idx, 'Actual'] = row['Actual']
                 df_updated = recalc(df_updated)
-                save_forecast(df_updated)
+                save_forecast(session, df_updated)
                 st.success("✅ Previsiones guardadas")
                 st.rerun()
         with col_dl:

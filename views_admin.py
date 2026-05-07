@@ -4,11 +4,13 @@ import plotly.graph_objects as go
 import io, os
 from data import (load_forecast, save_forecast, delete_forecast,
                   load_and_merge, recalc,
-                  ACTIVITY_FILE, MARKET_FILE)
-from auth import load_users, load_delegaciones, USERS_FILE, DELEGACIONES_FILE
+                  load_users, load_delegaciones,
+                  save_users_from_df, save_delegaciones_from_df)
 
 DATA_DIR = "datos"
 MIME_XL  = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+ACTIVITY_FILE = os.path.join(DATA_DIR, "_upload_actividad.csv")
+MARKET_FILE   = os.path.join(DATA_DIR, "_upload_mercado.xlsx")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -81,8 +83,8 @@ def _summary_section(df, group_cols, title, chart_col, dl_key, dl_name, show_cha
 # Main render
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_admin_tabs():
-    df_master = load_forecast()
+def render_admin_tabs(session):
+    df_master = load_forecast(session)
     tab_labels = ["📤 Cargar Datos", "📊 Vista Global", "✏️ Editar Datos",
                   "👥 Usuarios", "🔗 Delegaciones"]
     tabs = st.tabs(tab_labels)
@@ -126,10 +128,10 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
             if st.button("🔄 Procesar y generar forecast unificado", type="primary", use_container_width=True):
                 try:
                     with st.spinner("Cruzando archivos por SAP..."):
-                        df_merged = load_and_merge(ACTIVITY_FILE, MARKET_FILE)
+                        df_merged = load_and_merge(session, ACTIVITY_FILE, MARKET_FILE)
                     # Diagnostics
                     sin_mercado = df_merged[df_merged['Mercado'] == 'Sin asignar']
-                    save_forecast(df_merged)
+                    save_forecast(session, df_merged)
                     st.success(f"✅ Forecast generado: {len(df_merged)} filas | "
                                f"{df_merged['Actividad'].nunique()} actividades | "
                                f"{df_merged['Mercado'].nunique()} mercados")
@@ -176,7 +178,7 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
                 c1, c2 = st.columns(2)
                 with c1:
                     if st.button("✅ Sí, borrar", type="primary"):
-                        delete_forecast()
+                        delete_forecast(session)
                         st.session_state["confirm_delete"] = False
                         st.rerun()
                 with c2:
@@ -312,7 +314,7 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
                 for idx, row in edited_admin.iterrows():
                     df_updated.loc[idx, 'Actual'] = row['Actual']
                 df_updated = recalc(df_updated)
-                save_forecast(df_updated)
+                save_forecast(session, df_updated)
                 st.success("✅ Cambios guardados")
                 st.rerun()
 
@@ -383,7 +385,7 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
                             if 'Actividad' in df_updated.columns:
                                 df_updated.loc[idx, 'Actividad'] = row.get('Actividad', '')
                         df_updated = recalc(df_updated)
-                        save_forecast(df_updated)
+                        save_forecast(session, df_updated)
                         st.success("✅ Correcciones guardadas")
                         st.rerun()
 
@@ -419,14 +421,16 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
         st.subheader("📤 Subir archivo de usuarios")
         u_file = st.file_uploader("usuarios_forecast.xlsx", type=["xlsx"], key="usr_upload")
         if u_file:
-            os.makedirs(DATA_DIR, exist_ok=True)
-            with open(USERS_FILE, "wb") as fh:
-                fh.write(u_file.getbuffer())
-            st.success("✅ Usuarios actualizados")
-            st.rerun()
+            try:
+                df_u = pd.read_excel(u_file)
+                save_users_from_df(session, df_u)
+                st.success("✅ Usuarios actualizados en Snowflake")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al cargar usuarios: {e}")
 
         st.markdown("---")
-        users  = load_users()
+        users  = load_users(session)
         u_data = [{"Email": k, "Comercial": v["comercial"],
                    "Rol": v["role"], "Contraseña": "••••••"}
                   for k, v in users.items()]
@@ -465,14 +469,16 @@ Archivo con 2 columnas: **Comercial_Titular** | **Comercial_Gestor**""")
         st.subheader("📤 Subir tabla de delegaciones")
         del_file = st.file_uploader("delegaciones_forecast.xlsx", type=["xlsx"], key="del_upload")
         if del_file:
-            os.makedirs(DATA_DIR, exist_ok=True)
-            with open(DELEGACIONES_FILE, "wb") as fh:
-                fh.write(del_file.getbuffer())
-            st.success("✅ Delegaciones actualizadas")
-            st.rerun()
+            try:
+                df_d = pd.read_excel(del_file)
+                save_delegaciones_from_df(session, df_d)
+                st.success("✅ Delegaciones actualizadas en Snowflake")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al cargar delegaciones: {e}")
 
         st.markdown("---")
-        df_del = load_delegaciones()
+        df_del = load_delegaciones(session)
         if df_del.empty:
             st.info("Sin delegaciones. Cada comercial ve solo sus propios clientes.")
         else:
