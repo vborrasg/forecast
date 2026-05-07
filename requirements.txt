@@ -1,5 +1,5 @@
 streamlit
 pandas
 openpyxl
-xlsxwriter
 plotly
+snowflake-snowpark-python

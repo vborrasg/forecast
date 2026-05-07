@@ -1,6 +1,5 @@
 import streamlit as st
-import pandas as pd
-import os, random, smtplib, sys
+import os, random, smtplib, sys, json
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -16,14 +15,30 @@ def _secret(key, default=""):
         return os.getenv(key, default)
 
 
+def _get_smtp_credentials():
+    """Lee SMTP desde Snowflake Secret (_snowflake) o st.secrets."""
+    try:
+        import _snowflake
+        raw   = _snowflake.get_generic_secret_string('SMTP_CREDENTIALS')
+        creds = json.loads(raw)
+        return (creds.get('smtp_user', ''), creds.get('smtp_pass', ''),
+                'smtp.gmail.com', 587)
+    except Exception:
+        pass
+    return (
+        _secret("SMTP_USER", ""),
+        _secret("SMTP_PASSWORD", ""),
+        _secret("SMTP_SERVER", "smtp.gmail.com"),
+        int(_secret("SMTP_PORT", "587"))
+    )
+
+
 def send_otp(email_to, otp):
-    smtp_server = _secret("SMTP_SERVER", "smtp.gmail.com")
-    smtp_port   = int(_secret("SMTP_PORT", "587"))
-    smtp_user   = _secret("SMTP_USER", "")
-    smtp_pass   = _secret("SMTP_PASSWORD", "")
+    smtp_user, smtp_pass, smtp_server, smtp_port = _get_smtp_credentials()
     if not smtp_user or not smtp_pass:
         print(f"[DEV] OTP para {email_to}: {otp}", file=sys.stderr)
-        st.info("📧 Código enviado. Revisa la consola del servidor (modo dev sin SMTP).")
+        with st.expander("⚙️ SMTP no configurado — ver código (solo admin)"):
+            st.code(otp)
         return True
     try:
         msg = MIMEMultipart()
@@ -32,13 +47,17 @@ def send_otp(email_to, otp):
         msg['Subject'] = "Código de acceso — Forecast Producción"
         msg.attach(MIMEText(
             f"Tu código de acceso temporal es: {otp}\n\nVálido por 5 minutos.", 'plain'))
-        s = smtplib.SMTP(smtp_server, smtp_port)
-        s.starttls(); s.login(smtp_user, smtp_pass)
-        s.sendmail(smtp_user, email_to, msg.as_string()); s.quit()
+        s = smtplib.SMTP(smtp_server, smtp_port, timeout=15)
+        s.starttls()
+        s.login(smtp_user, smtp_pass)
+        s.sendmail(smtp_user, email_to, msg.as_string())
+        s.quit()
         return True
     except Exception as e:
-        st.error(f"Error SMTP: {e}")
-        return False
+        st.error(f"❌ Error SMTP: `{type(e).__name__}: {e}`")
+        with st.expander("⚙️ Acceso de emergencia — ver código"):
+            st.code(otp)
+        return True
 
 
 def init_session():
@@ -51,21 +70,23 @@ def init_session():
             st.session_state[k] = v
 
 
-def render_login(session):
+def render_login():
     st.markdown("<br><br>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        st.markdown("<h2 style='text-align:center;color:#1e3a8a'>📦 Forecast de Producción</h2>",
-                    unsafe_allow_html=True)
-        st.markdown("<p style='text-align:center;color:gray'>Acceso para comerciales y administración</p>",
-                    unsafe_allow_html=True)
+        st.markdown(
+            "<h2 style='text-align:center;color:#1e3a8a'>📦 Forecast de Producción</h2>",
+            unsafe_allow_html=True)
+        st.markdown(
+            "<p style='text-align:center;color:gray'>Acceso para comerciales y administración</p>",
+            unsafe_allow_html=True)
 
         if not st.session_state["otp_sent"]:
             with st.form("login_form"):
                 email = st.text_input("Email", placeholder="tu@empresa.com")
                 pwd   = st.text_input("Contraseña", type="password")
                 if st.form_submit_button("Siguiente →", use_container_width=True):
-                    u  = load_users(session)
+                    u  = load_users()
                     ec = email.strip().lower()
                     if ec in u and u[ec]["password"] == pwd:
                         otp = str(random.randint(100000, 999999))
@@ -81,18 +102,17 @@ def render_login(session):
         else:
             with st.form("otp_form"):
                 st.info("Se ha enviado un código de 6 dígitos a tu email.")
-                otp_in = st.text_input("Código OTP", max_chars=6,
-                                        type="password")   # ← type="password" oculta el código
+                otp_in = st.text_input("Código OTP", max_chars=6, type="password")
                 if st.form_submit_button("Validar acceso", use_container_width=True):
                     age = (datetime.now() - st.session_state["otp_timestamp"]).total_seconds()
                     if age > 300:
-                        st.error("⏰ Código expirado. Vuelve a intentarlo.")
+                        st.error("⏰ Código expirado.")
                         st.session_state["otp_sent"] = False
                     elif st.session_state["otp_attempts"] >= 3:
                         st.error("🚫 Demasiados intentos.")
                         st.session_state["otp_sent"] = False
                     elif otp_in.strip() == st.session_state["otp_code"]:
-                        u  = load_users(session)
+                        u  = load_users()
                         ec = st.session_state["current_user"]
                         st.session_state.update({
                             "authenticated": True, "otp_code": None,

@@ -1,12 +1,13 @@
+import streamlit as st
 import pandas as pd
 import re
+import os
 
 # ── Tablas Snowflake ──────────────────────────────────────────────────────────
-FORECAST_TABLE   = "FORECAST_DB.APP.FORECAST_DATA"
-USUARIOS_TABLE   = "FORECAST_DB.APP.USUARIOS"
+FORECAST_TABLE    = "FORECAST_DB.APP.FORECAST_DATA"
+USUARIOS_TABLE    = "FORECAST_DB.APP.USUARIOS"
 DELEGACIONES_TABLE = "FORECAST_DB.APP.DELEGACIONES"
 
-# ── Mapeo de columnas app ↔ Snowflake ─────────────────────────────────────────
 APP_TO_SF = {
     'Planta': 'PLANTA', 'Actividad': 'ACTIVIDAD', 'Mercado': 'MERCADO',
     'SAP': 'SAP', 'Clientes': 'CLIENTES', 'Comercial': 'COMERCIAL',
@@ -16,6 +17,49 @@ APP_TO_SF = {
 }
 SF_TO_APP = {v: k for k, v in APP_TO_SF.items()}
 
+DATA_DIR = "datos"
+ACTIVITY_FILE = os.path.join(DATA_DIR, "_upload_actividad.csv")
+MARKET_FILE   = os.path.join(DATA_DIR, "_upload_mercado.xlsx")
+
+
+# ── Sesión Snowflake (SiS o Streamlit Cloud) ─────────────────────────────────
+
+def get_sf_session():
+    """Devuelve sesión Snowflake: usa get_active_session() en SiS,
+    o crea una nueva con st.secrets en Streamlit Cloud."""
+    if 'sf_session' in st.session_state and st.session_state['sf_session'] is not None:
+        return st.session_state['sf_session']
+
+    # Intento 1: Streamlit in Snowflake
+    try:
+        from snowflake.snowpark.context import get_active_session
+        session = get_active_session()
+        st.session_state['sf_session'] = session
+        return session
+    except Exception:
+        pass
+
+    # Intento 2: Conexión externa (Streamlit Cloud)
+    try:
+        from snowflake.snowpark import Session
+        params = {
+            "account":   st.secrets["SNOWFLAKE_ACCOUNT"],
+            "user":      st.secrets["SNOWFLAKE_USER"],
+            "password":  st.secrets["SNOWFLAKE_PASSWORD"],
+            "warehouse": st.secrets.get("SNOWFLAKE_WAREHOUSE", "FORECAST_WH"),
+            "database":  st.secrets.get("SNOWFLAKE_DATABASE", "FORECAST_DB"),
+            "schema":    st.secrets.get("SNOWFLAKE_SCHEMA", "APP"),
+            "role":      st.secrets.get("SNOWFLAKE_ROLE", "FORECAST_ROLE"),
+        }
+        session = Session.builder.configs(params).create()
+        st.session_state['sf_session'] = session
+        return session
+    except Exception as e:
+        st.error(f"❌ No se pudo conectar a Snowflake: {e}")
+        return None
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _parse_es_number(val):
     if val is None:
@@ -37,20 +81,25 @@ def _extract_sap(client_str):
     return m.group(1) if m else None
 
 
-# ── Carga y guardado de forecast ──────────────────────────────────────────────
+# ── Forecast ──────────────────────────────────────────────────────────────────
 
-def load_forecast(session):
+def load_forecast():
+    session = get_sf_session()
+    if session is None:
+        return pd.DataFrame()
     try:
         df = session.sql(f"SELECT * FROM {FORECAST_TABLE}").to_pandas()
-        df = df.rename(columns=SF_TO_APP)
-        return df
+        return df.rename(columns=SF_TO_APP)
     except Exception:
         return pd.DataFrame()
 
 
-def save_forecast(session, df):
+def save_forecast(df):
+    session = get_sf_session()
+    if session is None:
+        return
     df_sf = df.rename(columns=APP_TO_SF)
-    cols = [c for c in APP_TO_SF.values() if c in df_sf.columns]
+    cols  = [c for c in APP_TO_SF.values() if c in df_sf.columns]
     df_sf = df_sf[cols].copy()
     for c in ['QTY_LY', 'ACTUAL_LY', 'QTY_BUDGET', 'BUDGET', 'QTY_ACTUAL', 'ACTUAL']:
         if c in df_sf.columns:
@@ -60,16 +109,22 @@ def save_forecast(session, df):
                          database="FORECAST_DB", schema="APP", overwrite=False)
 
 
-def delete_forecast(session):
-    session.sql(f"TRUNCATE TABLE {FORECAST_TABLE}").collect()
+def delete_forecast():
+    session = get_sf_session()
+    if session:
+        session.sql(f"TRUNCATE TABLE {FORECAST_TABLE}").collect()
 
 
-# ── Usuarios y delegaciones ───────────────────────────────────────────────────
+# ── Usuarios ──────────────────────────────────────────────────────────────────
 
-def load_users(session):
-    """Devuelve dict {email: {password, comercial, role}}"""
+def load_users():
+    session = get_sf_session()
+    if session is None:
+        return {}
     try:
-        df = session.sql(f"SELECT EMAIL, PASSWORD, COMERCIAL, ROL FROM {USUARIOS_TABLE}").to_pandas()
+        df = session.sql(
+            f"SELECT EMAIL, PASSWORD, COMERCIAL, ROL FROM {USUARIOS_TABLE}"
+        ).to_pandas()
         return {
             str(r['EMAIL']).strip().lower(): {
                 'password':  str(r['PASSWORD']),
@@ -82,37 +137,49 @@ def load_users(session):
         return {}
 
 
-def save_users_from_df(session, df):
-    """Carga masiva desde DataFrame con columnas Email|Contraseña|Comercial."""
+def save_users_from_df(df):
+    session = get_sf_session()
+    if session is None:
+        return
     session.sql(f"TRUNCATE TABLE {USUARIOS_TABLE}").collect()
-    rows = []
     for _, r in df.iterrows():
         email = str(r.iloc[0]).strip().lower()
         pwd   = str(r.iloc[1]).strip()
         com   = str(r.iloc[2]).strip() if len(df.columns) >= 3 else ''
         if email and '@' in email and email != 'nan':
-            rows.append((email, pwd, com, 'comercial'))
-    # Insert admin always
-    rows.append(('vbrrsg@gmail.com', 'Albope5@', '__ADMIN__', 'admin'))
-    for email, pwd, com, rol in rows:
-        session.sql(f"""
-            INSERT INTO {USUARIOS_TABLE} (EMAIL, PASSWORD, COMERCIAL, ROL)
-            SELECT '{email}','{pwd}','{com}','{rol}'
-            WHERE NOT EXISTS (
-                SELECT 1 FROM {USUARIOS_TABLE} WHERE EMAIL='{email}')
-        """).collect()
+            session.sql(f"""
+                INSERT INTO {USUARIOS_TABLE} (EMAIL, PASSWORD, COMERCIAL, ROL)
+                VALUES ('{email}', '{pwd}', '{com}', 'comercial')
+            """).collect()
+    # Siempre mantener admin
+    session.sql(f"""
+        INSERT INTO {USUARIOS_TABLE} (EMAIL, PASSWORD, COMERCIAL, ROL)
+        SELECT 'vbrrsg@gmail.com','Albope5@','__ADMIN__','admin'
+        WHERE NOT EXISTS (
+            SELECT 1 FROM {USUARIOS_TABLE} WHERE EMAIL='vbrrsg@gmail.com')
+    """).collect()
 
 
-def load_delegaciones(session):
+# ── Delegaciones ──────────────────────────────────────────────────────────────
+
+def load_delegaciones():
+    session = get_sf_session()
+    if session is None:
+        return pd.DataFrame(columns=['Comercial_Titular', 'Comercial_Gestor'])
     try:
-        df = session.sql(f"SELECT TITULAR, GESTOR FROM {DELEGACIONES_TABLE}").to_pandas()
+        df = session.sql(
+            f"SELECT TITULAR, GESTOR FROM {DELEGACIONES_TABLE}"
+        ).to_pandas()
         df.columns = ['Comercial_Titular', 'Comercial_Gestor']
         return df
     except Exception:
         return pd.DataFrame(columns=['Comercial_Titular', 'Comercial_Gestor'])
 
 
-def save_delegaciones_from_df(session, df):
+def save_delegaciones_from_df(df):
+    session = get_sf_session()
+    if session is None:
+        return
     session.sql(f"TRUNCATE TABLE {DELEGACIONES_TABLE}").collect()
     for _, r in df.iterrows():
         t = str(r.iloc[0]).strip()
@@ -123,9 +190,9 @@ def save_delegaciones_from_df(session, df):
             ).collect()
 
 
-def get_managed_comerciales(session, my_comercial):
+def get_managed_comerciales(my_comercial):
     result = [my_comercial]
-    df_del = load_delegaciones(session)
+    df_del = load_delegaciones()
     if not df_del.empty:
         rows = df_del[df_del['Comercial_Gestor'].str.strip() == my_comercial]
         for _, r in rows.iterrows():
@@ -135,7 +202,7 @@ def get_managed_comerciales(session, my_comercial):
     return result
 
 
-# ── Parsers de archivos de subida ─────────────────────────────────────────────
+# ── Parsers de archivos ───────────────────────────────────────────────────────
 
 def load_activity_csv(path):
     for enc in ['utf-16', 'utf-16-le', 'utf-16-be']:
@@ -163,7 +230,7 @@ def load_market_excel(path):
     df.columns = [c.strip() for c in df.columns]
     if 'Clientes' not in df.columns or 'Mercado' not in df.columns:
         raise ValueError("El archivo de mercado debe tener columnas 'Clientes' y 'Mercado'.")
-    df['SAP']    = df['Clientes'].apply(_extract_sap)
+    df['SAP']     = df['Clientes'].apply(_extract_sap)
     df['Mercado'] = df['Mercado'].astype(str).str.strip()
     return (df.dropna(subset=['SAP'])
               .drop_duplicates(subset=['SAP'])
@@ -171,7 +238,7 @@ def load_market_excel(path):
               .to_dict())
 
 
-def load_and_merge(session, activity_path, market_path):
+def load_and_merge(activity_path, market_path):
     df      = load_activity_csv(activity_path)
     sap_map = load_market_excel(market_path)
     df['Mercado'] = df['SAP'].map(sap_map).fillna('Sin asignar')
@@ -181,7 +248,7 @@ def load_and_merge(session, activity_path, market_path):
     return recalc(df)
 
 
-# ── Recálculo de columnas derivadas ──────────────────────────────────────────
+# ── Recálculo ─────────────────────────────────────────────────────────────────
 
 def recalc(df):
     df = df.copy()

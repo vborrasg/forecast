@@ -83,8 +83,8 @@ def _summary_section(df, group_cols, title, chart_col, dl_key, dl_name, show_cha
 # Main render
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_admin_tabs(session):
-    df_master = load_forecast(session)
+def render_admin_tabs():
+    df_master = load_forecast()
     tab_labels = ["📤 Cargar Datos", "📊 Vista Global", "✏️ Editar Datos",
                   "👥 Usuarios", "🔗 Delegaciones"]
     tabs = st.tabs(tab_labels)
@@ -128,10 +128,9 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
             if st.button("🔄 Procesar y generar forecast unificado", type="primary", use_container_width=True):
                 try:
                     with st.spinner("Cruzando archivos por SAP..."):
-                        df_merged = load_and_merge(session, ACTIVITY_FILE, MARKET_FILE)
-                    # Diagnostics
+                        df_merged = load_and_merge(ACTIVITY_FILE, MARKET_FILE)
                     sin_mercado = df_merged[df_merged['Mercado'] == 'Sin asignar']
-                    save_forecast(session, df_merged)
+                    save_forecast(df_merged)
                     st.success(f"✅ Forecast generado: {len(df_merged)} filas | "
                                f"{df_merged['Actividad'].nunique()} actividades | "
                                f"{df_merged['Mercado'].nunique()} mercados")
@@ -178,7 +177,7 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
                 c1, c2 = st.columns(2)
                 with c1:
                     if st.button("✅ Sí, borrar", type="primary"):
-                        delete_forecast(session)
+                        delete_forecast()
                         st.session_state["confirm_delete"] = False
                         st.rerun()
                 with c2:
@@ -314,7 +313,7 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
                 for idx, row in edited_admin.iterrows():
                     df_updated.loc[idx, 'Actual'] = row['Actual']
                 df_updated = recalc(df_updated)
-                save_forecast(session, df_updated)
+                save_forecast(df_updated)
                 st.success("✅ Cambios guardados")
                 st.rerun()
 
@@ -385,7 +384,7 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
                             if 'Actividad' in df_updated.columns:
                                 df_updated.loc[idx, 'Actividad'] = row.get('Actividad', '')
                         df_updated = recalc(df_updated)
-                        save_forecast(session, df_updated)
+                        save_forecast(df_updated)
                         st.success("✅ Correcciones guardadas")
                         st.rerun()
 
@@ -423,14 +422,14 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
         if u_file:
             try:
                 df_u = pd.read_excel(u_file)
-                save_users_from_df(session, df_u)
+                save_users_from_df(df_u)
                 st.success("✅ Usuarios actualizados en Snowflake")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error al cargar usuarios: {e}")
 
         st.markdown("---")
-        users  = load_users(session)
+        users = load_users()
         u_data = [{"Email": k, "Comercial": v["comercial"],
                    "Rol": v["role"], "Contraseña": "••••••"}
                   for k, v in users.items()]
@@ -471,14 +470,14 @@ Archivo con 2 columnas: **Comercial_Titular** | **Comercial_Gestor**""")
         if del_file:
             try:
                 df_d = pd.read_excel(del_file)
-                save_delegaciones_from_df(session, df_d)
+                save_delegaciones_from_df(df_d)
                 st.success("✅ Delegaciones actualizadas en Snowflake")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error al cargar delegaciones: {e}")
 
         st.markdown("---")
-        df_del = load_delegaciones(session)
+        df_del = load_delegaciones()
         if df_del.empty:
             st.info("Sin delegaciones. Cada comercial ve solo sus propios clientes.")
         else:
