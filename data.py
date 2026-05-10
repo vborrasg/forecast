@@ -170,15 +170,20 @@ def load_users():
 
 def save_users_from_df(df):
     _exec(f"TRUNCATE TABLE {USUARIOS_TABLE}")
+    batch = []
     for _, r in df.iterrows():
         email = str(r.iloc[0]).strip().lower()
         pwd   = str(r.iloc[1]).strip()
         com   = str(r.iloc[2]).strip() if len(df.columns) >= 3 else ''
         if email and '@' in email and email != 'nan':
-            _exec(f"""
-                INSERT INTO {USUARIOS_TABLE} (EMAIL, PASSWORD, COMERCIAL, ROL)
-                VALUES ('{_esc(email)}', '{_esc(pwd)}', '{_esc(com)}', 'comercial')
-            """)
+            batch.append(f"('{_esc(email)}', '{_esc(pwd)}', '{_esc(com)}', 'comercial')")
+        
+        if len(batch) >= 100:
+            _exec(f"INSERT INTO {USUARIOS_TABLE} (EMAIL, PASSWORD, COMERCIAL, ROL) VALUES {', '.join(batch)}")
+            batch = []
+            
+    if batch:
+        _exec(f"INSERT INTO {USUARIOS_TABLE} (EMAIL, PASSWORD, COMERCIAL, ROL) VALUES {', '.join(batch)}")
     # Siempre mantener admin
     _exec(f"""
         INSERT INTO {USUARIOS_TABLE} (EMAIL, PASSWORD, COMERCIAL, ROL)
@@ -200,12 +205,19 @@ def load_delegaciones():
 
 def save_delegaciones_from_df(df):
     _exec(f"TRUNCATE TABLE {DELEGACIONES_TABLE}")
+    batch = []
     for _, r in df.iterrows():
         t = str(r.iloc[0]).strip()
         g = str(r.iloc[1]).strip()
         if t and g and t != 'nan':
-            _exec(f"INSERT INTO {DELEGACIONES_TABLE} (TITULAR, GESTOR) "
-                  f"VALUES ('{_esc(t)}', '{_esc(g)}')")
+            batch.append(f"('{_esc(t)}', '{_esc(g)}')")
+            
+        if len(batch) >= 100:
+            _exec(f"INSERT INTO {DELEGACIONES_TABLE} (TITULAR, GESTOR) VALUES {', '.join(batch)}")
+            batch = []
+            
+    if batch:
+        _exec(f"INSERT INTO {DELEGACIONES_TABLE} (TITULAR, GESTOR) VALUES {', '.join(batch)}")
 
 
 def get_managed_comerciales(my_comercial):
