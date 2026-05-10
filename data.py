@@ -163,17 +163,28 @@ def delete_forecast():
 # ── Usuarios ──────────────────────────────────────────────────────────────────
 
 # Admin hardcodeado: siempre puede entrar aunque la tabla esté vacía
-_HARDCODED_ADMINS = {
-    'vbrrsg@gmail.com': {
-        'password': 'Albope5@', 'comercial': '__ADMIN__', 'role': 'admin'
-    },
-}
+# La contraseña se lee de secrets.toml (NO hardcodeada en el código)
+def _get_admin_password():
+    try:
+        return st.secrets["ADMIN_PASSWORD"]
+    except Exception:
+        return None
+
+def _get_hardcoded_admins():
+    pwd = _get_admin_password()
+    if not pwd:
+        return {}
+    return {
+        'vbrrsg@gmail.com': {
+            'password': pwd, 'comercial': '__ADMIN__', 'role': 'admin'
+        },
+    }
 
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_users():
     # Empezar con los admins hardcodeados (fallback de seguridad)
-    users = dict(_HARDCODED_ADMINS)
+    users = _get_hardcoded_admins()
     df = _query(f"SELECT EMAIL, PASSWORD, COMERCIAL, ROL FROM {USUARIOS_TABLE}")
     if not df.empty:
         for _, r in df.iterrows():
