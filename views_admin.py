@@ -420,20 +420,29 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
         st.subheader("📤 Subir archivo de usuarios")
         u_file = st.file_uploader("usuarios_forecast.xlsx", type=["xlsx"], key="usr_upload")
         if u_file:
+            # Previsualizar el archivo subido
             try:
-                df_u = pd.read_excel(u_file)
-                save_users_from_df(df_u)
-                st.success("✅ Usuarios actualizados en Snowflake")
-                st.rerun()
+                df_u_preview = pd.read_excel(io.BytesIO(u_file.getvalue()))
+                st.write(f"📋 **{len(df_u_preview)} filas** detectadas en el archivo:")
+                st.dataframe(df_u_preview.head(10), width='stretch')
+
+                if st.button("✅ Procesar y subir usuarios a Snowflake", type="primary",
+                              key="btn_upload_users"):
+                    try:
+                        save_users_from_df(df_u_preview)
+                        st.success(f"✅ {len(df_u_preview)} usuarios actualizados en Snowflake")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error al guardar usuarios en Snowflake: {e}")
             except Exception as e:
-                st.error(f"Error al cargar usuarios: {e}")
+                st.error(f"❌ Error al leer el archivo Excel: {e}")
 
         st.markdown("---")
         users = load_users()
         u_data = [{"Email": k, "Comercial": v["comercial"],
                    "Rol": v["role"], "Contraseña": "••••••"}
                   for k, v in users.items()]
-        st.subheader("Usuarios registrados")
+        st.subheader(f"Usuarios registrados ({len(u_data)})")
         st.dataframe(pd.DataFrame(u_data), width='stretch')
 
         if not df_master.empty and 'Comercial' in df_master.columns:
@@ -468,13 +477,22 @@ Archivo con 2 columnas: **Comercial_Titular** | **Comercial_Gestor**""")
         st.subheader("📤 Subir tabla de delegaciones")
         del_file = st.file_uploader("delegaciones_forecast.xlsx", type=["xlsx"], key="del_upload")
         if del_file:
+            # Previsualizar el archivo subido
             try:
-                df_d = pd.read_excel(del_file)
-                save_delegaciones_from_df(df_d)
-                st.success("✅ Delegaciones actualizadas en Snowflake")
-                st.rerun()
+                df_d_preview = pd.read_excel(io.BytesIO(del_file.getvalue()))
+                st.write(f"📋 **{len(df_d_preview)} delegaciones** detectadas:")
+                st.dataframe(df_d_preview, width='stretch')
+
+                if st.button("✅ Procesar y subir delegaciones a Snowflake", type="primary",
+                              key="btn_upload_deleg"):
+                    try:
+                        save_delegaciones_from_df(df_d_preview)
+                        st.success(f"✅ {len(df_d_preview)} delegaciones actualizadas en Snowflake")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error al guardar delegaciones en Snowflake: {e}")
             except Exception as e:
-                st.error(f"Error al cargar delegaciones: {e}")
+                st.error(f"❌ Error al leer el archivo Excel: {e}")
 
         st.markdown("---")
         df_del = load_delegaciones()

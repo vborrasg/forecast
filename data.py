@@ -25,16 +25,24 @@ MARKET_FILE   = os.path.join(DATA_DIR, "_upload_mercado.xlsx")
 # ── Conexión Snowflake (snowflake-connector-python) ──────────────────────────
 
 def _get_connection():
-    """Devuelve una conexión a Snowflake usando snowflake-connector-python.
-    Cachea la conexión en session_state para reutilizarla."""
-    if 'sf_conn' in st.session_state:
-        conn = st.session_state['sf_conn']
+    """Crea o reutiliza una conexión a Snowflake, reconectando si la conexión expiró."""
+    # Usar session_state para almacenar la conexión (no cache_resource, que no
+    # permite invalidar fácilmente una conexión muerta)
+    if '_sf_conn' in st.session_state and st.session_state['_sf_conn'] is not None:
+        conn = st.session_state['_sf_conn']
         try:
+            # Health check: ejecutar una query trivial para verificar que la conexión vive
             conn.cursor().execute("SELECT 1")
             return conn
         except Exception:
-            pass  # Conexión caída, reconectar
+            # Conexión muerta — reconectar
+            try:
+                conn.close()
+            except Exception:
+                pass
+            st.session_state['_sf_conn'] = None
 
+    # Crear nueva conexión
     import snowflake.connector
     try:
         conn = snowflake.connector.connect(
@@ -46,7 +54,7 @@ def _get_connection():
             schema    = st.secrets.get("SNOWFLAKE_SCHEMA", "APP"),
             role      = st.secrets.get("SNOWFLAKE_ROLE", "FORECAST_ROLE"),
         )
-        st.session_state['sf_conn'] = conn
+        st.session_state['_sf_conn'] = conn
         return conn
     except Exception as e:
         st.error(f"❌ Error de conexión a Snowflake: `{type(e).__name__}: {e}`")
@@ -70,14 +78,11 @@ def _query(sql):
 
 
 def _exec(sql):
-    """Ejecuta SQL sin devolver datos."""
+    """Ejecuta SQL sin devolver datos. LANZA EXCEPCIÓN si falla."""
     conn = _get_connection()
     if conn is None:
-        return
-    try:
-        conn.cursor().execute(sql)
-    except Exception as e:
-        st.error(f"❌ Error SQL: `{e}`")
+        raise ConnectionError("No hay conexión a Snowflake")
+    conn.cursor().execute(sql)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -118,7 +123,7 @@ def load_forecast():
 
 
 def save_forecast(df):
-    st.cache_data.clear()
+    load_forecast.clear()
     conn = _get_connection()
     if conn is None:
         return
@@ -152,7 +157,7 @@ def save_forecast(df):
 
 def delete_forecast():
     _exec(f"TRUNCATE TABLE {FORECAST_TABLE}")
-    st.cache_data.clear()
+    load_forecast.clear()
 
 
 # ── Usuarios ──────────────────────────────────────────────────────────────────
@@ -173,8 +178,10 @@ def load_users():
 
 
 def save_users_from_df(df):
-    st.cache_data.clear()
+    """Guarda usuarios en Snowflake. Lanza excepción si falla."""
+    # Primero borrar los datos existentes
     _exec(f"TRUNCATE TABLE {USUARIOS_TABLE}")
+
     batch = []
     for _, r in df.iterrows():
         email = str(r.iloc[0]).strip().lower()
@@ -189,6 +196,7 @@ def save_users_from_df(df):
             
     if batch:
         _exec(f"INSERT INTO {USUARIOS_TABLE} (EMAIL, PASSWORD, COMERCIAL, ROL) VALUES {', '.join(batch)}")
+
     # Siempre mantener admin
     _exec(f"""
         INSERT INTO {USUARIOS_TABLE} (EMAIL, PASSWORD, COMERCIAL, ROL)
@@ -196,6 +204,8 @@ def save_users_from_df(df):
         WHERE NOT EXISTS (
             SELECT 1 FROM {USUARIOS_TABLE} WHERE EMAIL='vbrrsg@gmail.com')
     """)
+    # Invalidar SOLO el cache de usuarios
+    load_users.clear()
 
 
 # ── Delegaciones ──────────────────────────────────────────────────────────────
@@ -210,8 +220,10 @@ def load_delegaciones():
 
 
 def save_delegaciones_from_df(df):
-    st.cache_data.clear()
+    """Guarda delegaciones en Snowflake. Lanza excepción si falla."""
+    # Primero borrar los datos existentes
     _exec(f"TRUNCATE TABLE {DELEGACIONES_TABLE}")
+
     batch = []
     for _, r in df.iterrows():
         t = str(r.iloc[0]).strip()
@@ -225,6 +237,9 @@ def save_delegaciones_from_df(df):
             
     if batch:
         _exec(f"INSERT INTO {DELEGACIONES_TABLE} (TITULAR, GESTOR) VALUES {', '.join(batch)}")
+
+    # Invalidar SOLO el cache de delegaciones
+    load_delegaciones.clear()
 
 
 def get_managed_comerciales(my_comercial):
