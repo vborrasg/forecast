@@ -162,19 +162,28 @@ def delete_forecast():
 
 # ── Usuarios ──────────────────────────────────────────────────────────────────
 
+# Admin hardcodeado: siempre puede entrar aunque la tabla esté vacía
+_HARDCODED_ADMINS = {
+    'vbrrsg@gmail.com': {
+        'password': 'Albope5@', 'comercial': '__ADMIN__', 'role': 'admin'
+    },
+}
+
+
 @st.cache_data(ttl=60, show_spinner=False)
 def load_users():
+    # Empezar con los admins hardcodeados (fallback de seguridad)
+    users = dict(_HARDCODED_ADMINS)
     df = _query(f"SELECT EMAIL, PASSWORD, COMERCIAL, ROL FROM {USUARIOS_TABLE}")
-    if df.empty:
-        return {}
-    return {
-        str(r['EMAIL']).strip().lower(): {
-            'password':  str(r['PASSWORD']),
-            'comercial': str(r['COMERCIAL']),
-            'role':      str(r['ROL'])
-        }
-        for _, r in df.iterrows()
-    }
+    if not df.empty:
+        for _, r in df.iterrows():
+            email = str(r['EMAIL']).strip().lower()
+            users[email] = {
+                'password':  str(r['PASSWORD']),
+                'comercial': str(r['COMERCIAL']),
+                'role':      str(r['ROL'])
+            }
+    return users
 
 
 def save_users_from_df(df):
