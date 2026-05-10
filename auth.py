@@ -85,7 +85,7 @@ def render_login():
             with st.form("login_form"):
                 email = st.text_input("Email", placeholder="tu@empresa.com")
                 pwd   = st.text_input("Contraseña", type="password")
-                if st.form_submit_button("Siguiente →", use_container_width=True):
+                if st.form_submit_button("Siguiente →", width='stretch'):
                     try:
                         u  = load_users()
                         ec = email.strip().lower()
@@ -109,7 +109,7 @@ def render_login():
             with st.form("otp_form"):
                 st.info("Se ha enviado un código de 6 dígitos a tu email.")
                 otp_in = st.text_input("Código OTP", max_chars=6, type="password")
-                if st.form_submit_button("Validar acceso", use_container_width=True):
+                if st.form_submit_button("Validar acceso", width='stretch'):
                     age = (datetime.now() - st.session_state["otp_timestamp"]).total_seconds()
                     if age > 300:
                         st.error("⏰ Código expirado.")
@@ -130,6 +130,6 @@ def render_login():
                         st.session_state["otp_attempts"] += 1
                         st.error(f"❌ Código incorrecto. "
                                  f"Intentos restantes: {3 - st.session_state['otp_attempts']}")
-            if st.button("← Volver", use_container_width=True):
+            if st.button("← Volver", width='stretch'):
                 st.session_state["otp_sent"] = False
                 st.rerun()

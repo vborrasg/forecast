@@ -109,6 +109,7 @@ def _esc(val):
 
 # ── Forecast ──────────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=60, show_spinner=False)
 def load_forecast():
     df = _query(f"SELECT * FROM {FORECAST_TABLE}")
     if df.empty:
@@ -117,6 +118,7 @@ def load_forecast():
 
 
 def save_forecast(df):
+    st.cache_data.clear()
     conn = _get_connection()
     if conn is None:
         return
@@ -150,10 +152,12 @@ def save_forecast(df):
 
 def delete_forecast():
     _exec(f"TRUNCATE TABLE {FORECAST_TABLE}")
+    st.cache_data.clear()
 
 
 # ── Usuarios ──────────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=60, show_spinner=False)
 def load_users():
     df = _query(f"SELECT EMAIL, PASSWORD, COMERCIAL, ROL FROM {USUARIOS_TABLE}")
     if df.empty:
@@ -169,6 +173,7 @@ def load_users():
 
 
 def save_users_from_df(df):
+    st.cache_data.clear()
     _exec(f"TRUNCATE TABLE {USUARIOS_TABLE}")
     batch = []
     for _, r in df.iterrows():
@@ -195,6 +200,7 @@ def save_users_from_df(df):
 
 # ── Delegaciones ──────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=60, show_spinner=False)
 def load_delegaciones():
     df = _query(f"SELECT TITULAR, GESTOR FROM {DELEGACIONES_TABLE}")
     if df.empty:
@@ -204,6 +210,7 @@ def load_delegaciones():
 
 
 def save_delegaciones_from_df(df):
+    st.cache_data.clear()
     _exec(f"TRUNCATE TABLE {DELEGACIONES_TABLE}")
     batch = []
     for _, r in df.iterrows():

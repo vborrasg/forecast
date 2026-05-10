@@ -34,7 +34,7 @@ def _summary_block(df, group_col, title, key_prefix, show_chart=True):
     st.dataframe(grp.style.format({
         'Previsión': '{:,.0f} €', 'Budget': '{:,.0f} €', 'N1': '{:,.0f} €',
         'Qty_Tn': '{:,.1f}', '% vs Budget': '{:+.1f}%', '% vs N-1': '{:+.1f}%'
-    }), use_container_width=True)
+    }), width='stretch')
 
     col1, col2 = st.columns([3, 1])
     with col2:
@@ -47,7 +47,7 @@ def _summary_block(df, group_col, title, key_prefix, show_chart=True):
         fig.add_trace(go.Bar(name="Budget",    x=grp[group_col], y=grp['Budget'],    marker_color="#94a3b8"))
         fig.add_trace(go.Bar(name="N-1",       x=grp[group_col], y=grp['N1'],        marker_color="#f59e0b"))
         fig.update_layout(barmode="group", height=360, xaxis_tickangle=-30)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
 
 def render_comercial_tabs(my_comercial):
@@ -164,7 +164,7 @@ def render_comercial_tabs(my_comercial):
         edited = st.data_editor(
             df_filtered[display_cols],
             column_config=col_cfg,
-            use_container_width=True,
+            width='stretch',
             height=min(650, 55 + len(df_filtered) * 35),
             num_rows="fixed",
             key="forecast_editor"
@@ -172,7 +172,7 @@ def render_comercial_tabs(my_comercial):
 
         col_save, col_dl = st.columns(2)
         with col_save:
-            if st.button("💾 Guardar previsiones", type="primary", use_container_width=True):
+            if st.button("💾 Guardar previsiones", type="primary", width='stretch'):
                 df_updated = df_master.copy()
                 for idx, row in edited.iterrows():
                     df_updated.loc[idx, 'Actual'] = row['Actual']
@@ -184,7 +184,7 @@ def render_comercial_tabs(my_comercial):
             df_dl = recalc(df_master[df_master['Comercial'].isin(managed)].copy())
             st.download_button("📥 Descargar mis datos", _to_excel(df_dl),
                                file_name=f"forecast_{my_comercial.replace(' ', '_')}.xlsx",
-                               mime=MIME_XL, use_container_width=True)
+                               mime=MIME_XL, width='stretch')
 
         # Comparativas en tiempo real
         st.markdown("---")

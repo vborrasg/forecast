@@ -70,13 +70,13 @@ def _summary_section(df, group_cols, title, chart_col, dl_key, dl_name, show_cha
         st.info(f"Columnas necesarias no disponibles: {group_cols}")
         return
     grp, styled = _summary(df, group_cols)
-    st.dataframe(styled, use_container_width=True, height=min(500, 55 + len(grp)*35))
+    st.dataframe(styled, width='stretch', height=min(500, 55 + len(grp)*35))
     col1, col2 = st.columns([3, 1])
     with col2:
         st.download_button(f"📥 Descargar", _to_excel(grp),
                            file_name=dl_name, mime=MIME_XL, key=dl_key)
     if show_chart and chart_col and chart_col in grp.columns:
-        st.plotly_chart(_bar_chart(grp, chart_col, title), use_container_width=True)
+        st.plotly_chart(_bar_chart(grp, chart_col, title), width='stretch')
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -125,7 +125,7 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
                     f"Mercado {'✅' if mkt_ready else '❌ pendiente'}")
 
         if act_ready and mkt_ready:
-            if st.button("🔄 Procesar y generar forecast unificado", type="primary", use_container_width=True):
+            if st.button("🔄 Procesar y generar forecast unificado", type="primary", width='stretch'):
                 try:
                     with st.spinner("Cruzando archivos por SAP..."):
                         df_merged = load_and_merge(ACTIVITY_FILE, MARKET_FILE)
@@ -143,7 +143,7 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
                     st.error(f"Error al procesar: {e}")
         else:
             st.button("🔄 Procesar forecast", disabled=True,
-                      help="Sube ambos archivos primero", use_container_width=True)
+                      help="Sube ambos archivos primero", width='stretch')
 
         # Current forecast info
         if not df_master.empty:
@@ -242,7 +242,7 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
 
             st.markdown("---")
             with st.expander("📋 Ver detalle completo de todas las filas"):
-                st.dataframe(df_g, use_container_width=True, height=400)
+                st.dataframe(df_g, width='stretch', height=400)
 
     # ── TAB 2 ─ EDITAR DATOS ─────────────────────────────────────────────────
     with tabs[2]:
@@ -302,13 +302,13 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
             edited_admin = st.data_editor(
                 df_show[show_cols],
                 column_config=col_cfg,
-                use_container_width=True,
+                width='stretch',
                 height=min(700, 55 + len(df_show) * 35),
                 num_rows="fixed",
                 key="admin_editor"
             )
 
-            if st.button("💾 Guardar cambios", type="primary", use_container_width=True):
+            if st.button("💾 Guardar cambios", type="primary", width='stretch'):
                 df_updated = df_master.copy()
                 for idx, row in edited_admin.iterrows():
                     df_updated.loc[idx, 'Actual'] = row['Actual']
@@ -369,14 +369,14 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
                     fixed_editor = st.data_editor(
                         df_missing[fix_cols],
                         column_config=fix_col_cfg,
-                        use_container_width=True,
+                        width='stretch',
                         height=min(400, 55 + len(df_missing) * 40),
                         num_rows="fixed",
                         key="fix_editor"
                     )
 
                     if st.button("💾 Guardar correcciones Mercado/Actividad",
-                                 type="primary", use_container_width=True, key="save_fix"):
+                                 type="primary", width='stretch', key="save_fix"):
                         df_updated = df_master.copy()
                         for idx, row in fixed_editor.iterrows():
                             if 'Mercado' in df_updated.columns:
@@ -434,7 +434,7 @@ La app cruza ambos por **código SAP** y genera el forecast unificado.""")
                    "Rol": v["role"], "Contraseña": "••••••"}
                   for k, v in users.items()]
         st.subheader("Usuarios registrados")
-        st.dataframe(pd.DataFrame(u_data), use_container_width=True)
+        st.dataframe(pd.DataFrame(u_data), width='stretch')
 
         if not df_master.empty and 'Comercial' in df_master.columns:
             st.subheader("Validación Comerciales ↔ Usuarios")
@@ -482,7 +482,7 @@ Archivo con 2 columnas: **Comercial_Titular** | **Comercial_Gestor**""")
             st.info("Sin delegaciones. Cada comercial ve solo sus propios clientes.")
         else:
             st.subheader("Delegaciones activas")
-            st.dataframe(df_del, use_container_width=True)
+            st.dataframe(df_del, width='stretch')
             if not df_master.empty and 'Comercial' in df_master.columns:
                 all_coms = set(df_master['Comercial'].dropna().unique())
                 st.markdown("**Validación:**")
