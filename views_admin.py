@@ -46,7 +46,7 @@ def _summary(df, group_cols, key_suffix=""):
         'LY_EUR': '{:,.0f} €', 'Qty_Actual_Tn': '{:,.1f}',
         'Qty_Budget_Tn': '{:,.1f}', '% vs Budget': '{:+.1f}%', '% vs N-1': '{:+.1f}%'
     }
-    styled = grp.style.format(fmt).applymap(
+    styled = grp.style.format(fmt).map(
         lambda v: ('color:#16a34a;font-weight:bold' if isinstance(v, float) and v >= 0
                    else 'color:#dc2626;font-weight:bold' if isinstance(v, float) and v < 0 else ''),
         subset=['% vs Budget', '% vs N-1']
